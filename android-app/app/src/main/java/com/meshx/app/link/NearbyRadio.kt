@@ -1,6 +1,7 @@
 package com.meshx.app.link
 
 import android.content.Context
+import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.AdvertisingOptions
 import com.google.android.gms.nearby.connection.ConnectionInfo
@@ -38,6 +39,12 @@ class NearbyRadio(context: Context, star: Boolean) : PeerRadio {
         myName = name
         this.onPeers = onPeers
         this.onError = onError
+        // Clear anything left over from an earlier start, otherwise Nearby answers "already advertising".
+        client.stopAdvertising()
+        client.stopDiscovery()
+        client.stopAllEndpoints()
+        connected.clear()
+        asked.clear()
         running = true
         client.startAdvertising(name, SERVICE_ID, lifecycle, AdvertisingOptions.Builder().setStrategy(strategy).build())
             .addOnFailureListener { failed(it) }
@@ -46,6 +53,9 @@ class NearbyRadio(context: Context, star: Boolean) : PeerRadio {
     }
 
     private fun failed(cause: Exception) {
+        // 8001 = already advertising, 8002 = already discovering: Nearby is running, which is what we want.
+        val code = (cause as? ApiException)?.statusCode
+        if (code == 8001 || code == 8002) return
         if (!running) return
         running = false
         onError("Phone-to-phone mode could not start. Check that Bluetooth, Wi-Fi and Location are on. (${cause.message ?: "unknown error"})")
@@ -98,7 +108,6 @@ class NearbyRadio(context: Context, star: Boolean) : PeerRadio {
     }
 
     override fun stop() {
-        if (!running && connected.isEmpty()) return
         running = false
         client.stopAdvertising()
         client.stopDiscovery()
