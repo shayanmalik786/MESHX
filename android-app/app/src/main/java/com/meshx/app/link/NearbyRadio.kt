@@ -1,6 +1,8 @@
 package com.meshx.app.link
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.AdvertisingOptions
@@ -30,6 +32,10 @@ class NearbyRadio(context: Context, star: Boolean) : PeerRadio {
     private val asked = HashSet<String>()
     private var myName = ""
     private var running = false
+    private var retried = false
+    private var waiting = false
+    private var canAdvertise = true
+    private val main = Handler(Looper.getMainLooper())
     private var onPeers: (Int) -> Unit = {}
     private var onError: (String) -> Unit = {}
 
@@ -39,33 +45,51 @@ class NearbyRadio(context: Context, star: Boolean) : PeerRadio {
         myName = name
         this.onPeers = onPeers
         this.onError = onError
-        // Clear anything left over from an earlier start, otherwise Nearby answers "already advertising".
-        client.stopAdvertising()
-        client.stopDiscovery()
-        client.stopAllEndpoints()
         connected.clear()
         asked.clear()
         running = true
-        client.startAdvertising(name, SERVICE_ID, lifecycle, AdvertisingOptions.Builder().setStrategy(strategy).build())
-            .addOnFailureListener { failed(it) }
-        client.startDiscovery(SERVICE_ID, discovery, DiscoveryOptions.Builder().setStrategy(strategy).build())
-            .addOnFailureListener { failed(it) }
+        retried = false
+        canAdvertise = true
+        begin()
     }
 
-    private fun failed(cause: Exception) {
-        // 8001 = already advertising, 8002 = already discovering: Nearby is running, which is what we want.
+    private fun begin() {
+        waiting = false
+        client.startAdvertising(myName, SERVICE_ID, lifecycle, AdvertisingOptions.Builder().setStrategy(strategy).build())
+            .addOnFailureListener { failed(it, "advertising") }
+        client.startDiscovery(SERVICE_ID, discovery, DiscoveryOptions.Builder().setStrategy(strategy).build())
+            .addOnFailureListener { failed(it, "discovery") }
+    }
+
+    private fun failed(cause: Exception, what: String) {
+        if (!running || waiting) return
         val code = (cause as? ApiException)?.statusCode
+        // 8001 = already advertising, 8002 = already discovering: Nearby is running, which is what we want.
         if (code == 8001 || code == 8002) return
-        if (!running) return
+        // Some phones cannot announce themselves. They can still find others and connect to them.
+        if (what == "advertising" && retried) {
+            canAdvertise = false
+            return
+        }
+        // Anything else: clear Nearby once and try again after a short pause, then give up.
+        if (!retried) {
+            retried = true
+            waiting = true
+            client.stopAdvertising()
+            client.stopDiscovery()
+            client.stopAllEndpoints()
+            main.postDelayed({ if (running) begin() }, 2000)
+            return
+        }
         running = false
-        onError("Phone-to-phone mode could not start. Check that Bluetooth, Wi-Fi and Location are on. (${cause.message ?: "unknown error"})")
+        onError("Phone-to-phone mode could not start ($what, code ${code ?: "?"}). Turn on Bluetooth, Wi-Fi and Location, allow all permissions, and update Google Play services.")
     }
 
     private val discovery = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
             if (!running || endpointId in connected || endpointId in asked) return
             // Only one of two phones asks, the one whose name sorts first. Otherwise both ask at once and both fail.
-            if (myName <= info.endpointName) {
+            if (!canAdvertise || myName <= info.endpointName) {
                 asked.add(endpointId)
                 client.requestConnection(myName, endpointId, lifecycle).addOnFailureListener { asked.remove(endpointId) }
             }
@@ -109,6 +133,7 @@ class NearbyRadio(context: Context, star: Boolean) : PeerRadio {
 
     override fun stop() {
         running = false
+        main.removeCallbacksAndMessages(null)
         client.stopAdvertising()
         client.stopDiscovery()
         client.stopAllEndpoints()

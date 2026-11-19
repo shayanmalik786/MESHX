@@ -49,6 +49,8 @@ object Permissions {
             Build.VERSION.SDK_INT >= 33 -> arrayOf(
                 Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT,
                 Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.NEARBY_WIFI_DEVICES,
+                // Nearby Connections still checks location on new Android versions too.
+                Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION,
             )
             Build.VERSION.SDK_INT >= 31 -> arrayOf(
                 Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT,
