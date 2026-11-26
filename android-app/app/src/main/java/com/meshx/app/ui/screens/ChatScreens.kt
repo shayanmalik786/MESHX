@@ -1,8 +1,11 @@
+
+
 package com.meshx.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -48,6 +52,7 @@ import com.meshx.app.model.ChatMessage
 import com.meshx.app.model.MsgStatus
 import com.meshx.app.protocol.Protocol
 import com.meshx.app.ui.components.Avatar
+import com.meshx.app.ui.components.Chip
 import com.meshx.app.ui.components.EmptyState
 import com.meshx.app.ui.components.Fab
 import com.meshx.app.ui.components.IconAction
@@ -63,44 +68,91 @@ import java.util.Locale
 fun ChatsScreen(state: UiState, app: AppController) {
     val c = Mesh.colors
     val conversations = state.conversations
+
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            TopBar("Chats") { LinkPill(state) { app.open(Screen.Connect) } }
-            if (conversations.isEmpty()) {
-                EmptyState(MeshIcons.Chats, "No messages yet", "Write to one person, or to everyone on the mesh at once.")
+            TopBar("Chats") {
+                LinkPill(state) {
+                    app.open(Screen.Connect)
+                }
             }
+
+            if (conversations.isEmpty()) {
+                EmptyState(
+                    MeshIcons.Chats,
+                    "No messages yet",
+                    "Write to one person, or to everyone on the mesh at once."
+                )
+            }
+
             LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
                 items(conversations, key = { it.peer }) { conversation ->
                     val peer = conversation.peer
                     val last = conversation.last
+
                     Row(
-                        Modifier.fillMaxWidth().clickable { app.openChat(peer) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { app.openChat(peer) }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Avatar(state.nameOf(peer), peer, 48.dp, if (peer == BROADCAST_ID) null else state.nodes[peer]?.online == true)
+                        Avatar(
+                            state.nameOf(peer),
+                            peer,
+                            48.dp,
+                            if (peer == BROADCAST_ID) null else state.nodes[peer]?.online == true
+                        )
+
                         Spacer(Modifier.width(12.dp))
+
                         Column(Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
-                                    state.nameOf(peer), color = c.ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                                    state.nameOf(peer),
+                                    color = c.ink,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
                                 )
-                                Text(clockLabel(last.time), color = c.muted, fontSize = 12.sp)
+
+                                Text(
+                                    clockLabel(last.time),
+                                    color = c.muted,
+                                    fontSize = 12.sp
+                                )
                             }
+
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (last.outgoing) {
                                     StatusIcon(last.status, c.muted)
                                     Spacer(Modifier.width(4.dp))
                                 }
+
                                 Text(
-                                    last.text, color = c.muted, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    last.text,
+                                    color = c.muted,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f),
                                 )
+
                                 if (conversation.unread > 0) {
-                                    Box(Modifier.size(20.dp).clip(CircleShape).background(c.primary), contentAlignment = Alignment.Center) {
+                                    Box(
+                                        Modifier
+                                            .size(20.dp)
+                                            .clip(CircleShape)
+                                            .background(c.primary),
+                                        contentAlignment = Alignment.Center
+                                    ) {
                                         Text(
                                             if (conversation.unread > 9) "9+" else conversation.unread.toString(),
-                                            color = c.onPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                            color = c.onPrimary,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
                                         )
                                     }
                                 }
@@ -110,18 +162,32 @@ fun ChatsScreen(state: UiState, app: AppController) {
                 }
             }
         }
-        Fab("New message", MeshIcons.Plus, { app.showSheet(Sheet.NewChat) }, Modifier.align(Alignment.BottomEnd))
+
+        Fab(
+            "New message",
+            MeshIcons.Plus,
+            { app.showSheet(Sheet.NewChat) },
+            Modifier.align(Alignment.BottomEnd)
+        )
     }
 }
 
 @Composable
 private fun StatusIcon(status: MsgStatus, tint: Color) {
     val c = Mesh.colors
+
     when (status) {
-        MsgStatus.Sending -> Icon(MeshIcons.Clock, "Sending", tint = tint, modifier = Modifier.size(14.dp))
-        MsgStatus.Sent -> Icon(MeshIcons.Check, "Sent", tint = tint, modifier = Modifier.size(14.dp))
-        MsgStatus.Delivered -> Icon(MeshIcons.CheckCheck, "Delivered", tint = tint, modifier = Modifier.size(14.dp))
-        MsgStatus.Failed -> Icon(MeshIcons.Alert, "Not delivered", tint = c.danger, modifier = Modifier.size(14.dp))
+        MsgStatus.Sending ->
+            Icon(MeshIcons.Clock, "Sending", tint = tint, modifier = Modifier.size(14.dp))
+
+        MsgStatus.Sent ->
+            Icon(MeshIcons.Check, "Sent", tint = tint, modifier = Modifier.size(14.dp))
+
+        MsgStatus.Delivered ->
+            Icon(MeshIcons.CheckCheck, "Delivered", tint = tint, modifier = Modifier.size(14.dp))
+
+        MsgStatus.Failed ->
+            Icon(MeshIcons.Alert, "Not delivered", tint = c.danger, modifier = Modifier.size(14.dp))
     }
 }
 
@@ -130,25 +196,54 @@ fun ChatScreen(state: UiState, peer: Int, app: AppController) {
     val c = Mesh.colors
     val messages = state.chat(peer)
     val node = state.nodes[peer]
+
     var draft by remember(peer) { mutableStateOf("") }
+
     val subtitle = when {
         peer == BROADCAST_ID -> "Goes to every node, without delivery report"
         node == null -> "Node $peer · not heard yet"
         node.online -> "Node $peer · online · ${hopsLabel(node.hops)}"
         else -> "Node $peer · offline"
     }
+
     Column(Modifier.fillMaxSize()) {
         TopBar(state.nameOf(peer), subtitle, onBack = { app.back() }) {
             if (peer != BROADCAST_ID && state.contact(peer) == null) {
-                IconAction(MeshIcons.UserPlus, "Add contact", { app.showSheet(Sheet.ContactEditor(peer, node?.name ?: "")) })
+                IconAction(
+                    MeshIcons.UserPlus,
+                    "Add contact",
+                    {
+                        app.showSheet(Sheet.ContactEditor(peer, node?.name ?: ""))
+                    }
+                )
             }
-            if (peer != BROADCAST_ID) IconAction(MeshIcons.Info, "Node details", { app.open(Screen.NodeDetail(peer)) })
+
+            if (peer != BROADCAST_ID) {
+                IconAction(
+                    MeshIcons.Info,
+                    "Node details",
+                    { app.open(Screen.NodeDetail(peer)) }
+                )
+            }
+
             if (messages.isNotEmpty()) {
-                IconAction(MeshIcons.Trash, "Delete chat", {
-                    app.showSheet(Sheet.Confirm("Delete this chat?", "All messages with ${state.nameOf(peer)} are removed from this phone.", "Delete", ConfirmAction.DeleteChat(peer)))
-                })
+                IconAction(
+                    MeshIcons.Trash,
+                    "Delete chat",
+                    {
+                        app.showSheet(
+                            Sheet.Confirm(
+                                "Delete this chat?",
+                                "All messages with ${state.nameOf(peer)} are removed from this phone.",
+                                "Delete",
+                                ConfirmAction.DeleteChat(peer)
+                            )
+                        )
+                    }
+                )
             }
         }
+
         // newest message at the bottom, and the list stays there when new ones arrive
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth(),
@@ -156,49 +251,123 @@ fun ChatScreen(state: UiState, peer: Int, app: AppController) {
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            items(messages.asReversed(), key = { it.key }) { message -> Bubble(state, message, peer == BROADCAST_ID, app) }
+            items(messages.asReversed(), key = { it.key }) { message ->
+                Bubble(state, message, peer == BROADCAST_ID, app)
+            }
         }
+
         if (messages.isEmpty()) {
             Text(
                 "Messages are short, up to ${Protocol.MAX_TEXT_BYTES} bytes, because the radio link is slow.",
-                color = c.muted, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
+                color = c.muted,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
             )
         }
+
         if (!state.connected) {
             Text(
-                "Not connected to a node. Tap to connect.", color = c.danger, fontSize = 13.sp,
-                modifier = Modifier.fillMaxWidth().clickable { app.open(Screen.Connect) }.padding(horizontal = 16.dp, vertical = 6.dp),
+                "Not connected to a node. Tap to connect.",
+                color = c.danger,
+                fontSize = 13.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { app.open(Screen.Connect) }
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
             )
         }
-        Row(Modifier.fillMaxWidth().background(c.surface).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
+
+        //my changes start here
+        val quickMessages = listOf(
+            "I am safe",
+            "Need help",
+            "Where are you?",
+            "On my way",
+            "OK"
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            quickMessages.forEach { message ->
+                Chip(
+                    text = message,
+                    selected = false,
+                    onClick = {
+                        app.sendMessage(peer, message)
+                    }
+                )
+            }
+        }
+        //my changes end here
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(c.surface)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.Bottom
+        ) {
             val bytes = Protocol.utf8Length(draft)
+
             Box(
-                Modifier.weight(1f).clip(RoundedCornerShape(22.dp)).background(c.surfaceAlt).border(1.dp, c.outline, RoundedCornerShape(22.dp))
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(22.dp))
+                    .background(c.surfaceAlt)
+                    .border(1.dp, c.outline, RoundedCornerShape(22.dp))
                     .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
-                if (draft.isEmpty()) Text("Message", color = c.muted, fontSize = 15.sp)
+                if (draft.isEmpty()) {
+                    Text("Message", color = c.muted, fontSize = 15.sp)
+                }
+
                 BasicTextField(
                     value = draft,
-                    onValueChange = { draft = Protocol.truncateUtf8(it, Protocol.MAX_TEXT_BYTES) },
+                    onValueChange = {
+                        draft = Protocol.truncateUtf8(it, Protocol.MAX_TEXT_BYTES)
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     textStyle = TextStyle(color = c.ink, fontSize = 15.sp),
                     cursorBrush = SolidColor(c.primary),
                     maxLines = 4,
                 )
             }
+
             Spacer(Modifier.width(8.dp))
+
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (bytes > 110) Text("$bytes/${Protocol.MAX_TEXT_BYTES}", color = c.muted, fontSize = 10.sp)
+                if (bytes > 110) {
+                    Text(
+                        "$bytes/${Protocol.MAX_TEXT_BYTES}",
+                        color = c.muted,
+                        fontSize = 10.sp
+                    )
+                }
+
                 val ready = draft.isNotBlank()
+
                 Box(
-                    Modifier.size(46.dp).clip(CircleShape).background(if (ready) c.primary else c.outline)
+                    Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(if (ready) c.primary else c.outline)
                         .clickable(enabled = ready) {
                             app.sendMessage(peer, draft)
                             draft = ""
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(MeshIcons.Send, "Send", tint = if (ready) c.onPrimary else c.muted, modifier = Modifier.size(20.dp))
+                    Icon(
+                        MeshIcons.Send,
+                        "Send",
+                        tint = if (ready) c.onPrimary else c.muted,
+                        modifier = Modifier.size(20.dp)
+                    )
                 }
             }
         }
@@ -206,38 +375,83 @@ fun ChatScreen(state: UiState, peer: Int, app: AppController) {
 }
 
 @Composable
-private fun Bubble(state: UiState, message: ChatMessage, group: Boolean, app: AppController) {
+private fun Bubble(
+    state: UiState,
+    message: ChatMessage,
+    group: Boolean,
+    app: AppController
+) {
     val c = Mesh.colors
     val mine = message.outgoing
     val failed = message.status == MsgStatus.Failed
-    Column(Modifier.fillMaxWidth(), horizontalAlignment = if (mine) Alignment.End else Alignment.Start) {
-        val shape = RoundedCornerShape(18.dp, 18.dp, if (mine) 4.dp else 18.dp, if (mine) 18.dp else 4.dp)
+
+    Column(
+        Modifier.fillMaxWidth(),
+        horizontalAlignment = if (mine) Alignment.End else Alignment.Start
+    ) {
+        val shape = RoundedCornerShape(
+            18.dp,
+            18.dp,
+            if (mine) 4.dp else 18.dp,
+            if (mine) 18.dp else 4.dp
+        )
+
         Column(
-            Modifier.widthIn(max = 300.dp).clip(shape).background(if (mine) c.primary else c.bubbleIn)
-                .clickable(enabled = failed) { app.retryMessage(message.key) }.padding(horizontal = 12.dp, vertical = 8.dp),
+            Modifier
+                .widthIn(max = 300.dp)
+                .clip(shape)
+                .background(if (mine) c.primary else c.bubbleIn)
+                .clickable(enabled = failed) { app.retryMessage(message.key) }
+                .padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
             if (group && !mine) {
-                Text(state.nameOf(message.from), color = c.primaryDeep, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    state.nameOf(message.from),
+                    color = c.primaryDeep,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
-            Text(message.text, color = if (mine) c.onPrimary else c.ink, fontSize = 15.sp)
-            Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+
+            Text(
+                message.text,
+                color = if (mine) c.onPrimary else c.ink,
+                fontSize = 15.sp
+            )
+
+            Row(
+                Modifier.padding(top = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 val tint = if (mine) c.onPrimary.copy(alpha = 0.8f) else c.muted
+
                 val details = buildString {
                     append(clockLabel(message.time))
                     if (message.hops > 0) append(" · ").append(hopsLabel(message.hops))
-                    if (mine && message.rttMs > 0) append(" · ").append(String.format(Locale.US, "%.1f s", message.rttMs / 1000f))
+                    if (mine && message.rttMs > 0) {
+                        append(" · ").append(
+                            String.format(Locale.US, "%.1f s", message.rttMs / 1000f)
+                        )
+                    }
                 }
+
                 Text(details, color = tint, fontSize = 11.sp)
+
                 if (mine) {
                     Spacer(Modifier.width(4.dp))
                     StatusIcon(message.status, tint)
                 }
             }
         }
+
         if (failed) {
             Text(
                 "${message.failReason.ifEmpty { "Not delivered" }} Tap the message to try again.",
-                color = c.danger, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp, end = 4.dp).widthIn(max = 300.dp),
+                color = c.danger,
+                fontSize = 11.sp,
+                modifier = Modifier
+                    .padding(top = 2.dp, end = 4.dp)
+                    .widthIn(max = 300.dp),
             )
         }
     }

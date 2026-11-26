@@ -1,3 +1,4 @@
+
 package com.meshx.app.core
 
 import com.meshx.app.model.BROADCAST_ID
@@ -83,7 +84,17 @@ data class TrafficStats(
     val byKind: Map<String, Int> = emptyMap(),
     val perSecond: List<Int> = List(30) { 0 },     // packets in each of the last 30 seconds, newest last
 )
-
+// changes by Fatima
+data class TestRun(
+    val target: Int = 0,
+    val mode: RoutingMode = RoutingMode.Adaptive,
+    val total: Int = 0,
+    val sent: Int = 0,
+    val delivered: Int = 0,
+    val failed: Int = 0,
+    val results: List<String> = emptyList()
+)
+//
 data class RouteInfo(val path: List<Int> = emptyList(), val flood: Boolean = false)
 
 data class Conversation(val peer: Int, val last: ChatMessage, val unread: Int)
@@ -129,6 +140,9 @@ data class UiState(
     val traffic: List<PacketLog> = emptyList(),
     val trafficPaused: Boolean = false,
     val stats: TrafficStats = TrafficStats(),
+    //changes by Fatima
+    val test: TestRun? = null,
+    //
 
     // node settings
     val config: Map<String, String> = emptyMap(),

@@ -1,3 +1,4 @@
+
 package com.meshx.app.core
 
 import com.meshx.app.mesh.DemoControls
@@ -36,6 +37,9 @@ import java.util.zip.CRC32
  * It has no Android code in it, so the unit tests can run the complete app logic against the
  * demo mesh. Every function must be called on the main thread.
  */
+
+// Keep your existing package and imports at the top of this file.
+
 class AppController(private val device: Device) {
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state
@@ -63,7 +67,23 @@ class AppController(private val device: Device) {
     private var nextKey = 0L
     private var nextPingId = 1
     private var packetSeq = 0L
-    private val sentAt = HashMap<Long, Long>() // message key -> time it was handed to the node
+    private val sentAt = HashMap<Long, Long>()
+
+    //mychanges start here
+
+    private var testRunning = false
+    private var testTarget = 0
+    private var testTotal = 0
+    private var testSentCount = 0
+    private var testGapMs = 100L
+    private var testMode = RoutingMode.Adaptive
+
+    private val testMessageNumbers = LinkedHashMap<Long, Int>()
+
+    private var testSendTimer: TimerHandle? = null
+    private var testPollTimer: TimerHandle? = null
+
+    //changes here
 
     private var pendingNeed: Need? = null
     private var afterPermission: (() -> Unit)? = null
@@ -94,7 +114,6 @@ class AppController(private val device: Device) {
                 now = device.now(),
                 profile = saved.profile,
                 contacts = saved.contacts,
-                // a message that was still on its way when the app closed never got an answer
                 messages = saved.messages.map {
                     if (it.status == MsgStatus.Sending || (it.status == MsgStatus.Sent && it.peer != BROADCAST_ID)) {
                         it.copy(status = MsgStatus.Failed, failReason = "The app was closed")
@@ -234,7 +253,6 @@ class AppController(private val device: Device) {
         val clean = Protocol.cleanName(name)
         if (clean.isEmpty() || clean == s.profile.name) return
         update { it.copy(profile = it.profile.copy(name = clean)) }
-        // HELLO also carries the name, so the node announces the new one to the mesh
         if (s.connected) send(Protocol.hello(clean))
         scheduleSave()
     }
@@ -280,7 +298,6 @@ class AppController(private val device: Device) {
     private fun ensure(need: Need, action: () -> Unit) {
         val h = host
         if (h == null) {
-            // no screen to ask on: go ahead only when nothing is in the way
             if (device.problem(need) == null) action()
             return
         }
@@ -472,7 +489,6 @@ class AppController(private val device: Device) {
         val offline = s.nodes.mapValues { it.value.copy(online = false, hops = 0) }
         val hardware = spec is LinkSpec.Ble || spec is LinkSpec.Wifi
         if (spec != null && hardware && (wasConnected || retrying) && retries < RETRY_DELAYS_MS.size) {
-            // a hardware link that drops is usually back in a few seconds (node reboot, out of range)
             val delay = RETRY_DELAYS_MS[retries]
             retries++
             update { it.copy(link = LinkStatus(LinkState.Lost, spec, error = reason), nodes = offline) }
@@ -539,15 +555,15 @@ class AppController(private val device: Device) {
                 val online = frame.lastSeenSec == 0L
                 st.copy(
                     nodes = st.nodes + (
-                        frame.id to old.copy(
-                            name = frame.name.ifBlank { old.name },
-                            online = online,
-                            lastSeenAt = if (online) now else now - frame.lastSeenSec * 1000,
-                            rssi = frame.rssi, snr = frame.snr,
-                            battery = if (frame.battery >= 0) frame.battery else old.battery,
-                            loss = frame.loss, score = frame.score, hops = frame.hops, nextHop = frame.nextHop,
-                        )
-                        ),
+                            frame.id to old.copy(
+                                name = frame.name.ifBlank { old.name },
+                                online = online,
+                                lastSeenAt = if (online) now else now - frame.lastSeenSec * 1000,
+                                rssi = frame.rssi, snr = frame.snr,
+                                battery = if (frame.battery >= 0) frame.battery else old.battery,
+                                loss = frame.loss, score = frame.score, hops = frame.hops, nextHop = frame.nextHop,
+                            )
+                            ),
                 )
             }
 
@@ -567,11 +583,11 @@ class AppController(private val device: Device) {
                 val old = st.nodes[frame.id] ?: NodeInfo(frame.id)
                 st.copy(
                     nodes = st.nodes + (
-                        frame.id to old.copy(
-                            uptimeSec = frame.uptimeSec, tx = frame.tx, rx = frame.rx, fwd = frame.fwd, drop = frame.drop,
-                            phone = frame.phone, fw = frame.fw.ifBlank { old.fw },
-                        )
-                        ),
+                            frame.id to old.copy(
+                                uptimeSec = frame.uptimeSec, tx = frame.tx, rx = frame.rx, fwd = frame.fwd, drop = frame.drop,
+                                phone = frame.phone, fw = frame.fw.ifBlank { old.fw },
+                            )
+                            ),
                 )
             }
 
@@ -662,6 +678,254 @@ class AppController(private val device: Device) {
         "empty" -> "The message was empty"
         else -> reason
     }
+    // my changes start here
+
+    /**
+     * Starts a test by sending numbered messages to a destination node.
+     */
+    fun startTest(target: Int, count: Int, gapMs: Long) {
+
+        if (!s.connected) {
+            notice("Not connected to a node")
+            return
+        }
+
+        if (testRunning) {
+            notice("A test is already running")
+            return
+        }
+
+        if (target !in 1..MAX_NODE_ID || target == s.myId) {
+            notice("Choose a valid destination node")
+            return
+        }
+
+        if (count !in 1..MAX_MESSAGES) {
+            notice("Message count must be between 1 and $MAX_MESSAGES")
+            return
+        }
+
+        // Cancel any previous test timers.
+        testSendTimer?.cancel()
+        testPollTimer?.cancel()
+        testMessageNumbers.clear()
+
+        // Store the test settings.
+        testTarget = target
+        testTotal = count
+        testSentCount = 0
+        testGapMs = gapMs.coerceAtLeast(0)
+        testMode = s.routingMode
+        testRunning = true
+
+        // Reset the previous test results.
+        update {
+            it.copy(
+                test = TestRun(
+                    target = target,
+                    mode = testMode,
+                    total = count,
+                    sent = 0,
+                    delivered = 0,
+                    failed = 0,
+                    results = emptyList()
+                )
+            )
+        }
+
+        notice("Test started")
+
+        // Send the first message immediately.
+        sendNextTestMessage()
+
+        // Begin checking message delivery.
+        pollTestResults()
+    }
+
+    /**
+     * Sends the next numbered test message.
+     */
+    private fun sendNextTestMessage() {
+
+        if (!testRunning) return
+
+        val number = testSentCount + 1
+        val previousKey = nextKey
+
+        // Use the existing sendMessage function.
+        sendMessage(testTarget, "test $number")
+
+        // Find the message that was just created.
+        val message = s.messages.lastOrNull {
+            it.key > previousKey &&
+                    it.outgoing &&
+                    it.peer == testTarget
+        }
+
+        if (message == null) {
+            testRunning = false
+            testSendTimer?.cancel()
+            testPollTimer?.cancel()
+            notice("Could not create a test message")
+            return
+        }
+
+        // Associate the message key with its test number.
+        testMessageNumbers[message.key] = number
+
+        testSentCount++
+
+        // Update the sent message count in the UI.
+        update { st ->
+            st.copy(
+                test = st.test?.copy(sent = testSentCount)
+            )
+        }
+
+        // Schedule the next message.
+        if (testSentCount < testTotal) {
+            testSendTimer = timers.after(testGapMs) {
+                sendNextTestMessage()
+            }
+        }
+    }
+
+    /**
+     * Checks whether test messages have been delivered or failed.
+     */
+    private fun pollTestResults() {
+
+        if (!testRunning) return
+
+        val completed = mutableListOf<Pair<Long, String>>()
+
+        testMessageNumbers.toList().forEach { (key, number) ->
+
+            val message = s.messages.firstOrNull {
+                it.key == key
+            }
+
+            if (message != null &&
+                (message.status == MsgStatus.Delivered ||
+                        message.status == MsgStatus.Failed)
+            ) {
+
+                val status = if (message.status == MsgStatus.Delivered) {
+                    "delivered"
+                } else {
+                    "failed"
+                }
+
+                val hops = if (message.status == MsgStatus.Delivered) {
+                    message.hops.toString()
+                } else {
+                    ""
+                }
+
+                val rtt = if (message.status == MsgStatus.Delivered) {
+                    message.rttMs.toString()
+                } else {
+                    ""
+                }
+
+                // One CSV row for this message.
+                val csvLine = "$testMode,$number,$status,$hops,$rtt"
+
+                completed.add(key to csvLine)
+            }
+        }
+
+        // Remove messages that have already been processed.
+        completed.forEach { (key, _) ->
+            testMessageNumbers.remove(key)
+        }
+
+        // Add completed results to UiState.
+        if (completed.isNotEmpty()) {
+
+            update { st ->
+
+                val currentTest = st.test ?: return@update st
+
+                val newResults = currentTest.results + completed.map { it.second }
+
+                val newDelivered = newResults.count {
+                    it.split(",").getOrNull(2) == "delivered"
+                }
+
+                val newFailed = newResults.count {
+                    it.split(",").getOrNull(2) == "failed"
+                }
+
+                st.copy(
+                    test = currentTest.copy(
+                        delivered = newDelivered,
+                        failed = newFailed,
+                        results = newResults
+                    )
+                )
+            }
+        }
+
+        // Finish when every message has been sent and processed.
+        if (testSentCount == testTotal && testMessageNumbers.isEmpty()) {
+
+            testRunning = false
+
+            testSendTimer?.cancel()
+            testPollTimer?.cancel()
+
+            notice(
+                "Test completed: ${s.test?.delivered} delivered, ${s.test?.failed} failed"
+            )
+
+            return
+        }
+
+        // Check again after 100 milliseconds.
+        testPollTimer = timers.after(100) {
+            pollTestResults()
+        }
+    }
+
+    /**
+     * Exports the test results as a CSV file through the Android share sheet.
+     */
+    fun exportTest() {
+
+        val test = s.test
+
+        if (test == null || test.results.isEmpty()) {
+            notice("No test results available to export")
+            return
+        }
+
+        if (testRunning) {
+            notice("Wait until the test is completed before exporting")
+            return
+        }
+
+        val header = "mode,number,status,hops,rtt_ms"
+
+        // Sort results by message number.
+        val sortedResults = test.results.sortedBy {
+            it.split(",").getOrNull(1)?.toIntOrNull() ?: 0
+        }
+
+        val csv = buildString {
+            appendLine(header)
+
+            sortedResults.forEach { result ->
+                appendLine(result)
+            }
+        }
+
+        shareText(csv)
+        notice("Test CSV is ready to share")
+    }
+
+    //my changes end here
+
 
     // ------------------------------------------------------------------ messages
 
@@ -817,7 +1081,7 @@ class AppController(private val device: Device) {
             is QrCard.Network -> showSheet(
                 Sheet.Confirm(
                     title = "Join this mesh?",
-                    text = "Your node will use the scanned network key. It can then only talk to nodes that use the same key.",
+                    text = "Your node will use the scanned network key. It can then only talk to nodes that use the same network key.",
                     button = "Use this key",
                     action = ConfirmAction.ApplyNetworkKey(card.key),
                 ),
@@ -989,7 +1253,6 @@ class AppController(private val device: Device) {
             send(Protocol.OTA_END)
             otaWatchdog()
         } else {
-            // the screen does not need every chunk, a step every few is smooth enough
             if (otaSeq % 4 == 0) update { it.copy(ota = it.ota.copy(sent = otaOffset)) }
             sendOtaChunk()
         }
